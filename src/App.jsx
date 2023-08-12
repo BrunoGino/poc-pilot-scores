@@ -1,69 +1,109 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { AgGridReact } from 'ag-grid-react'
+import { data as apiData } from './data'
+import { useParams } from 'react-router-dom'
 
-const posts = [
-  {id: 1, title: 'One'},
-  {id: 2, title: 'TWo'},
-]
+import 'ag-grid-community/styles/ag-grid.css'; // Core grid CSS, always needed
+import 'ag-grid-community/styles/ag-theme-alpine.css'; // Optional theme CSS
+
+function wait(duration) {
+  return new Promise(resolve => setTimeout(resolve, duration))
+}
 
 function App() {
-  const queryClient = useQueryClient();
-  
-  const pokemonQuery = useQuery({
-    queryKey: ['posts'],
-    //refetchInterval: 1000, //automatically refreshes in 1 sec
-    queryFn: async () => {
-      const response = await fetch('https://pokeapi.co/api/v2/pokemon?limit=100000&offset=0')
-      return response.json();
-    },
+  const gridRef = useRef();
+  const { } = useParams();
+  const pilotQuery = useQuery({
+    queryKey: ['pilots'],
+    queryFn: () => wait(5000).then(() => apiData)
   });
 
-  const digimonQuery = useQuery({
-    queryKey: ['digimons'],
-    queryFn: async () => {
-      const response = await fetch('https://www.digi-api.com/api/v1/digimon?page=0')
-      return response.json()
-    },
-    cacheTime: 1000 * 30 ,
-  })
+  const [columnDefs, setColumnDefs] = useState([{
+    field: 'id',
+    hidden: true,
+  }, {
+    field: 'name'
+  },
+  {
+    field: 'plate'
+  }]);
 
-  const newPostMutation = useMutation({
-    mutationFn: (title) => {
-      return wait(1000).then(() => posts.push({id: crypto.randomUUID(), title}))
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['posts'])
+  const [flatData, setFlatData] = useState([])
+
+  const defaultColDef = {
+    sortable: true,
+    filter: true
+  };
+
+  useEffect(() => {
+    function flattify(rawData) {
+      const flatData = rawData.flatMap(d => d.cars.map(c => ({ id: d.id, name: d.name, brand: c.brand, year: c.year, plate: c.plate, ...Object.values(c.prizes) })));
+      return flatData;
     }
-  })
 
-  if(pokemonQuery.isLoading || digimonQuery.isLoading) {
+    function appendNewColumns(flatData) {
+      if (flatData.length < 1) {
+        return [];
+      }
+      const firstData = flatData[0];
+      const yearKeys = Object.keys(firstData)
+        .filter(key => !isNaN(Number.parseInt(key)));
+
+      console.log(Object.keys(firstData))
+      const columns = []
+      yearKeys.forEach(key => {
+        columns.push({
+          valueGetter: (params) => {
+            return params.data[key].amount
+          },
+          headerValueGetter: (params) => {
+            return firstData[key].year
+          }
+        })
+      })
+
+      return [...columnDefs, ...columns];
+    }
+
+    if (pilotQuery.data) {
+      const parsedData = flattify(pilotQuery.data);
+      console.log(parsedData)
+      setFlatData(parsedData);
+
+      const columns = appendNewColumns(parsedData);
+      setColumnDefs(columns);
+
+    }
+
+  }, [pilotQuery.data]);
+
+  const getRowId = useCallback((params) => {
+    return params.data.plate;
+  }, [])
+
+  if (pilotQuery.isLoading) {
     return <h1>Loading...</h1>
   }
 
-  if(pokemonQuery.error){
-    return <pre>Error: {JSON.stringify(pokemonQuery.error)}</pre>
+  if (pilotQuery.error) {
+    return <pre>Error: {JSON.stringify(pilotQuery.error)}</pre>
   }
 
   return (
-    <div>
-      {
-        pokemonQuery.data.results.map(pokemon => (
-          <div key={pokemon.name}>{pokemon.name}</div>
-        ))
-      }
-      {digimonQuery.data.content.map(digimon => (
-        <div key={digimon.name}>{digimon.name}</div>
-      ))}
-      {/* <button onClick={() => newPostMutation.mutate("new post")}>Add new</button> */}
+    <div className="ag-theme-alpine" style={{ height: 500 }}>
+      <AgGridReact
+        getRowId={getRowId}
+        ref={gridRef}
+        rowData={flatData}
+        columnDefs={columnDefs}
+        defaultColDef={defaultColDef}
+        animateRows={true}
+        rowSelection='multiple'
+      >
+      </AgGridReact>
     </div>
   )
-}
-
-function wait(duration){
-  return new Promise(resolve => setTimeout(resolve, duration))
 }
 
 export default App
